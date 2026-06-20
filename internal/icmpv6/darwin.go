@@ -82,7 +82,7 @@ func (s *Sender) SendRecv(srcIP, dstIP net.IP, payload []byte, timeoutMs uint32)
 
 	buf := make([]byte, 4096)
 	for {
-		n, from, err := s.conn.ReadFrom(buf)
+		n, _, err := s.conn.ReadFrom(buf)
 		if err != nil {
 			return nil, fmt.Errorf("read echo reply: %w", err)
 		}
@@ -95,23 +95,9 @@ func (s *Sender) SendRecv(srcIP, dstIP net.IP, payload []byte, timeoutMs uint32)
 			continue
 		}
 		echo, ok := rmsg.Body.(*icmp.Echo)
-		if !ok || echo.ID != s.echoID {
-			continue // not our reply
-		}
-		if !addrMatchesIP(from, dstIP) {
-			continue // reply from unexpected source
+		if !ok || echo.ID != s.echoID || echo.Seq != s.seq {
+			continue // not our reply (wrong ID or stale sequence)
 		}
 		return echo.Data, nil
 	}
-}
-
-// addrMatchesIP checks whether a net.Addr from ReadFrom corresponds to ip.
-func addrMatchesIP(addr net.Addr, ip net.IP) bool {
-	switch a := addr.(type) {
-	case *net.UDPAddr:
-		return a.IP.Equal(ip)
-	case *net.IPAddr:
-		return a.IP.Equal(ip)
-	}
-	return false
 }
