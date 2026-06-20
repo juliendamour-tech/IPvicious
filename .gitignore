@@ -1,0 +1,11 @@
+# Compiled binaries
+dist/
+*.exe
+server
+
+# Go build cache
+*.test
+*.out
+
+# macOS
+.DS_Store
