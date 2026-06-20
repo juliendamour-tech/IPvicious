@@ -37,7 +37,7 @@ type AgentEntry struct {
 	// Key is "<ipv6_addr>#<echoID>" — unique per agent.exe process even when
 	// multiple processes run on the same host (same IPv6 address).
 	// Immutable after creation.
-	Key    string
+	Key string
 	// EchoID is the ICMP echo identifier assigned by the OS to the agent's
 	// Icmp6CreateFile handle.  It is unique per process on the same host.
 	EchoID int

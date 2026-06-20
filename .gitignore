@@ -1,7 +1,7 @@
 # Compiled binaries
 dist/
 *.exe
-server
+/server
 
 # Go build cache
 *.test

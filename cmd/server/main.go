@@ -34,7 +34,7 @@ import (
 // Compile-time defaults; overridable at link time:
 //
 //	go build -ldflags "-X main.defaultPSK=secret -X main.defaultSocksBase=9090" ...
-var defaultPSK       = "" // empty = no encryption
+var defaultPSK = "" // empty = no encryption
 var defaultSocksBase = "1080"
 
 // parsedSocksBase converts defaultSocksBase to an int, falling back to 1080
@@ -48,9 +48,9 @@ func parsedSocksBase() int {
 }
 
 func main() {
-	noRepl    := flag.Bool("no-repl",    false,             "disable interactive REPL (headless mode)")
-	pskFlag   := flag.String("psk",      defaultPSK,        "pre-shared key for AES-256-GCM encryption (empty = disabled)")
-	socksBase := flag.Int("socks-base",  parsedSocksBase(), "starting TCP port for per-agent SOCKS5 proxies (REPL: 'socks' command)")
+	noRepl := flag.Bool("no-repl", false, "disable interactive REPL (headless mode)")
+	pskFlag := flag.String("psk", defaultPSK, "pre-shared key for AES-256-GCM encryption (empty = disabled)")
+	socksBase := flag.Int("socks-base", parsedSocksBase(), "starting TCP port for per-agent SOCKS5 proxies (REPL: 'socks' command)")
 	flag.Parse()
 
 	// ── ICMPv6 tunnel server ────────────────────────────────────────────────
@@ -102,4 +102,3 @@ func main() {
 	tun.Run(stop)
 	log.Printf("C2 server stopped")
 }
-
