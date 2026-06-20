@@ -1,6 +1,6 @@
-//go:build windows
+//go:build windows || darwin
 
-// cmd/client is the Windows agent entry point.
+// cmd/client is the agent entry point (Windows amd64 and macOS arm64/amd64).
 //
 // Compile-time defaults (override with ldflags):
 //
@@ -8,7 +8,7 @@
 //
 // Runtime flags:
 //
-//	agent.exe -c2 2001:db8::1 -poll 50
+//	agent -c2 2001:db8::1 -poll 50
 package main
 
 import (

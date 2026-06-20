@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || darwin
 
 // Package agent – relay.go provides SOCKS5 stream relay between the tunnel and a TCP target.
 //

