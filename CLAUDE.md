@@ -66,7 +66,7 @@ that can be overridden at link time with `-X main.<name>=<value>`:
 |----------|---------|-------------|
 | `defaultC2` | `::1` | C2 IPv6 address (client only) |
 | `defaultPollMs` | `50` | Poll interval ms (client only) |
-| `defaultSocksAddr` | `127.0.0.1:1080` | SOCKS5 listen addr (server only) |
+| `defaultSocksBase` | `1080` | First TCP port for per-agent SOCKS5 proxies (server only) |
 | `defaultPSK` | `` | AES-256-GCM pre-shared key (both) |
 
 ---
@@ -132,11 +132,16 @@ internal/tunnel/client.go    (//go:build windows)
 
 internal/tunnel/server.go    (//go:build linux)
     ServerTunnel.SetPSK(psk string) error   — call before Run
-    ServerTunnel.SetPollInterval(ms uint32) — sends TypeSetPoll frame to agent
-    ServerTunnel.Session() AgentSession     — snapshot; protected by sessionMu RWMutex
+    ServerTunnel.Agent(key string) *AgentEntry — lookup by "<ipv6>#<echoID>" key
+    AgentEntry.Key string                   — "<ipv6_addr>#<echoID>", immutable
+    AgentEntry.EchoID int                   — ICMP echo identifier (unique per process)
+    AgentEntry.Session() AgentSession       — snapshot; protected by AgentEntry.mu RWMutex
     AgentSession.LastPoll / NextPoll        — updated on every received frame
-    !! sessionMu must be held for ALL reads/writes of session fields
+    findOrCreate(from net.Addr, echoID int) — key = fmt.Sprintf("%s#%d", addr, echoID)
+    agentsMu sync.RWMutex                  — protects agents map[string]*AgentEntry
+    !! AgentEntry.mu must be held for ALL reads/writes of session fields
     !! ErrBadMagic AND ErrDecryptFailed frames must be dropped silently
+    !! Multiple agents on the same host are distinguished by echoID (per-process unique)
 
 internal/agent/agent.go      (//go:build windows)
     Agent.New(tun) wires all ClientTunnel callbacks
@@ -155,10 +160,17 @@ internal/socks5/socks5.go    (//go:build linux)
 
 internal/cli/repl.go         (//go:build linux)
     REPL.Run()
-    promptStr = colBold + colGreen + "IPvicious" + colReset + colBold + "> " + colReset
+    promptStr = colBold+colGreen+"IPvicious"+colReset+colBold+"> "+colReset  (no-agent default)
+    currentPromptLocked() string — returns "IPvicious[N]>" when agent N is active (holds mu)
+    agentOrder []string          — insertion-order list of agent keys
+    agentStates map[string]*agentState — per-agent download state + proxy map
+    activeKey string             — currently selected agent key
+    nextSocksPort int            — next auto-allocated SOCKS5 port (advances past manual ports too)
     asyncPrintf / asyncWrite — thread-safe output under mu (clears + reprints prompt)
     !! All output to the terminal MUST go through asyncPrintf or asyncWrite,
        never fmt.Print directly, to avoid interleaving with the prompt line.
+    !! OnFileData routes to ALL agents (not just activeKey) so in-flight downloads
+       are never interrupted by the operator switching agents.
 ```
 
 ---
@@ -208,8 +220,12 @@ These must never be broken:
    `sessionMu` (RLock for reads, Lock for writes). Currently: `handleRequest`
    (Lock), `Session()` (RLock), `SetPollInterval()` (Lock).
 
-5. **Stream leak**: `relay.go` must send `TypeStreamClose` when `streams.Get`
-   returns nil (the agent side has no stream for that ID).
+5. **Stream leak**: Three paths in the agent must clean up pre-allocated stream entries:
+   - `relay.go`: send `TypeStreamClose` when `streams.Get` returns nil.
+   - `agent.go handleStreamOpen`: call `streams.Remove(streamID)` + send `TypeStreamClose`
+     when `resolveTarget` fails (stream was pre-allocated by `AllocWithID` in `dispatch`).
+   - `relay.go relayStream`: call `streams.Remove(streamID)` + send `TypeStreamClose`
+     when `net.Dial` fails (same pre-allocation reason).
 
 6. **XOR key fragmentation**: The 16-byte XOR key in `crypto/xor.go` must stay
    split across `xk0`, `xk1`, `xk2`, `xk3` — never merge into a single literal.
