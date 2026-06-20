@@ -301,12 +301,21 @@ func (t *ServerTunnel) handleRequest(req *icmpv6.Request) {
 	entry.updateSession(req.From)
 	if isNew {
 		log.Printf("[tunnel] new agent: %s", entry.Key)
+		// Fire OnHello for every new entry regardless of the first frame type.
+		// This handles the server-restart case: agents that were already running
+		// will send TypeNoop (not TypeHello) to the new server, but the operator
+		// still needs to see them appear in the REPL.
+		if t.OnHello != nil {
+			go t.OnHello(entry.Key, req.From)
+		}
 	}
 
 	switch in.Type {
 	case protocol.TypeHello:
 		log.Printf("[tunnel] hello from %s", entry.Key)
-		if t.OnHello != nil {
+		// Fire OnHello again only for known agents that re-send Hello (e.g.
+		// agent restart with same echoID). Skip if already fired above (isNew).
+		if !isNew && t.OnHello != nil {
 			go t.OnHello(entry.Key, req.From)
 		}
 
